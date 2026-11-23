@@ -150,14 +150,14 @@ input.c,select.c{width:100%;padding:13px;border:1px solid var(--bd);border-radiu
 </nav>
 
 <div class="modal" id="mdl"><div class="sheet" id="sheet"></div></div>
-<input type="file" id="arqExtrato" accept=".ofx,.csv,.pdf,.txt,application/pdf" hidden>
+<input type="file" id="arqExtrato" hidden>
 <input type="file" id="arqBackup" accept=".json,application/json" hidden>
 <div class="toast" id="toast"></div>
 
 <script>
 'use strict';
 /* ============ Meu Dinheiro · versão 3.0 (app nativo) ============ */
-const VERSAO = '3.0';
+const VERSAO = '3.1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad = n => String(n).padStart(2, '0');
@@ -865,8 +865,9 @@ function interpretaBloco(b) {
   const d = b.match(RE_DT);
   if (!d || RE_IGNORA.test(b)) return null;
   const resto = b.slice(d.index + d[0].length);
-  const v = resto.match(RE_VAL);
-  if (!v) return null;
+  const todos = Array.from(resto.matchAll(new RegExp(RE_VAL.source, 'g')));
+  if (!todos.length) return null;
+  const v = todos[0], u = todos.length > 1 ? todos[todos.length - 1] : null;   // 1º número = valor, último = saldo
   const valor = num(v[1]);
   if (!(valor > 0)) return null;
   let meio = resto.slice(0, v.index).trim(), nr = '';
@@ -881,7 +882,23 @@ function interpretaBloco(b) {
     hist = toks.slice(0, i).join(' '); nome = toks.slice(i).join(' ');
   }
   nome = nome.replace(/\*{2,3}[\d.\/]*\*{2,3}/g, '').replace(/\s+/g, ' ').trim() || hist || 'Lançamento';
-  return {data:d[3] + '-' + d[2] + '-' + d[1], valor, entrada:v[2] === 'C', nome, hist, k:'ext:' + d[3] + d[2] + d[1] + ' ' + d[4] + ' ' + nr + ' ' + v[1] + v[2]};
+  const dt = d[3] + d[2] + d[1] + ' ' + d[4] + ' ' + nr;
+  return {data:d[3] + '-' + d[2] + '-' + d[1], valor, entrada:v[2] === 'C', nome, hist, k:'ext:' + dt + ' ' + v[1] + v[2], dt,
+    a:{v:valor, c:v[2] === 'C', t:v[1] + v[2]}, b:u ? {v:num(u[1]), c:u[2] === 'C', t:u[1] + u[2]} : null};
+}
+// Extrato tem duas colunas (valor e saldo). A conta corrida decide qual é qual:
+// o certo é aquele cuja variação do saldo, de uma linha para a outra, bate com o valor.
+function fixaOrientacao(itens) {
+  const c = itens.filter(i => i.b && i.b.v > 0);
+  if (c.length < 2) return;
+  const sg = x => x.c ? x.v : -x.v;
+  let ab = 0, ba = 0;
+  for (let i = 1; i < c.length; i++) {
+    const p = c[i - 1], q = c[i];
+    if (Math.abs(Math.abs(sg(q.b) - sg(p.b)) - q.a.v) < 0.02) ab++;
+    if (Math.abs(Math.abs(sg(q.a) - sg(p.a)) - q.b.v) < 0.02) ba++;
+  }
+  if (ba > ab) c.forEach(i => { const x = i.a; i.a = i.b; i.b = x; i.valor = i.a.v; i.entrada = i.a.c; i.k = 'ext:' + i.dt + ' ' + i.a.t; });
 }
 // Recebe o texto do PDF de duas formas (linhas por posição e texto corrido) e fica com a que achar mais lançamentos
 function itensDoTexto(linhas, corrido) {
@@ -892,6 +909,7 @@ function itensDoTexto(linhas, corrido) {
   while ((m = re.exec(corrido)) !== null) marcas.push(m.index);
   marcas.forEach((ini, i) => { const it = interpretaBloco(corrido.substring(ini, i + 1 < marcas.length ? marcas[i + 1] : corrido.length)); if (it) b.push(it); });
   const itens = b.length > a.length ? b : a;
+  fixaOrientacao(itens);
   const cm = corrido.match(/Cliente\s+(.+?)\s+Conta\b/);
   if (cm) itens.cliente = cm[1].trim();
   return itens;
@@ -955,7 +973,7 @@ function lerOFX(texto) {
     const dt = pega('DTPOSTED'), valor = parseFloat(pega('TRNAMT').replace(',', '.'));
     if (!dt || isNaN(valor) || valor === 0) return;
     const fit = pega('FITID');
-    itens.push({data:dt.slice(0, 4) + '-' + dt.slice(4, 6) + '-' + dt.slice(6, 8), valor:Math.abs(valor), entrada:valor > 0, nome:pega('MEMO') || pega('NAME') || 'Lançamento', hist:'', k:fit ? 'ofx:' + fit : ''});
+    itens.push({data:dt.slice(0, 4) + '-' + dt.slice(4, 6) + '-' + dt.slice(6, 8), valor:Math.abs(valor), entrada:valor > 0, nome:pega('NAME') || pega('MEMO') || 'Lançamento', hist:pega('MEMO'), k:fit ? 'ofx:' + fit : ''});
   });
   return itens;
 }
