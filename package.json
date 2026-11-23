@@ -1,0 +1,25 @@
+{
+  "name": "meu-dinheiro",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Meu Dinheiro: controle financeiro pessoal (app Android nativo via Capacitor)",
+  "scripts": {
+    "libs": "node scripts/copiar-libs.js",
+    "android:add": "npx cap add android",
+    "android:sync": "npm run libs && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/filesystem": "^6.0.1",
+    "@capacitor/share": "^6.0.2",
+    "@capacitor/splash-screen": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.1",
+    "pdfjs-dist": "3.11.174"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.1.2"
+  }
+}
