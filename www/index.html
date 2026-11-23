@@ -157,7 +157,7 @@ input.c,select.c{width:100%;padding:13px;border:1px solid var(--bd);border-radiu
 <script>
 'use strict';
 /* ============ Meu Dinheiro · versão 3.0 (app nativo) ============ */
-const VERSAO = '3.1';
+const VERSAO = '3.2';
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad = n => String(n).padStart(2, '0');
@@ -193,11 +193,11 @@ const ehEntrada = l => l.tipo === 'entrada';
 
 /* ---------- dados ---------- */
 const KEY = 'md2';
-function dbPadrao() { return {v:2, contas:[], cartoes:[], lanc:[], pagos:{}, orc:{}, metas:[], regras:{}, cfg:{tema:'auto', nome:''}, ultConta:''}; }
+function dbPadrao() { return {v:2, contas:[], cartoes:[], lanc:[], pagos:{}, orc:{}, metas:[], regras:{}, cfg:{tema:'auto', nome:'', saldoIni:0}, ultConta:''}; }
 function normaliza(d) {
   ['contas','cartoes','lanc','metas'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
   ['pagos','orc','regras'].forEach(k => { if (!d[k] || typeof d[k] !== 'object' || Array.isArray(d[k])) d[k] = {}; });
-  d.cfg = Object.assign({tema:'auto', nome:''}, d.cfg || {});
+  d.cfg = Object.assign({tema:'auto', nome:'', saldoIni:0}, d.cfg || {});
   d.lanc = d.lanc.filter(l => l && typeof l.data === 'string' && l.data.length === 10 && isFinite(l.valor));
   d.lanc.forEach(l => { l.id = String(l.id); });
   return d;
@@ -250,6 +250,20 @@ function totaisMes(a, m) {
   let e = 0, s = 0;
   doMes(a, m).forEach(l => { if (neutro(l)) return; if (ehEntrada(l)) e += l.valor; else s += l.valor; });
   return {e, s};
+}
+
+/* ---------- saldo acumulado: o que sobrou dos meses anteriores passa para o próximo ---------- */
+function saldoAnterior(a, m) {
+  let acc = Number(db.cfg.saldoIni) || 0, min = null;
+  db.lanc.forEach(l => { if (!min || l.data < min) min = l.data; });
+  if (!min) return acc;
+  let aa = +min.slice(0, 4), mm = +min.slice(5, 7) - 1, guarda = 0;
+  while ((aa < a || (aa === a && mm < m)) && guarda++ < 600) {
+    const t = totaisMes(aa, mm);
+    acc += t.e - t.s;
+    mm++; if (mm > 11) { mm = 0; aa++; }
+  }
+  return acc;
 }
 
 /* ---------- contas ---------- */
@@ -460,13 +474,14 @@ function diaHTML() {
   return ls.length ? ls.map(itemHTML).join('') : '<div class="vazio">Nada lançado nesse dia.<br>Toque no + para adicionar.</div>';
 }
 function renderInicio() {
-  const {e, s} = totaisMes(ano, mes), saldo = e - s;
+  const {e, s} = totaisMes(ano, mes), ant = saldoAnterior(ano, mes), res = e - s, saldo = ant + res;
   let h = vencHTML();
   h += '<label class="btnImp" for="arqExtrato">📥 Importar extrato <small>OFX, CSV ou PDF</small></label>';
-  h += '<div class="card saldo"><small>Saldo do mês</small><h2 class="' + (saldo >= 0 ? 'in' : 'out') + '">' + R(saldo) + '</h2><div class="row3">'
+  h += '<div class="card saldo"><small>Saldo disponível no fim do mês</small><h2 class="' + (saldo >= 0 ? 'in' : 'out') + '">' + R(saldo) + '</h2><div class="row3">'
+    + '<div class="mini"><small>Veio do mês anterior</small><b class="' + (ant >= 0 ? '' : 'out') + '">' + R(ant) + '</b></div>'
     + '<div class="mini"><small>Entradas</small><b class="in">' + R(e) + '</b></div>'
-    + '<div class="mini"><small>Saídas</small><b class="out">' + R(s) + '</b></div>'
-    + '<div class="mini"><small>Sobra</small><b>' + (e > 0 ? Math.round(saldo / e * 100) + '%' : '—') + '</b></div></div></div>';
+    + '<div class="mini"><small>Saídas</small><b class="out">' + R(s) + '</b></div></div>'
+    + '<p class="hint">Resultado só deste mês: <b class="' + (res >= 0 ? 'in' : 'out') + '">' + (res >= 0 ? '+ ' : '− ') + R(Math.abs(res)) + '</b></p></div>';
   h += '<div class="seg"><button data-a="visao" data-v="cal" class="' + (visao === 'cal' ? 'on' : '') + '">📅 Calendário</button><button data-a="visao" data-v="lista" class="' + (visao === 'lista' ? 'on' : '') + '">📋 Lista do mês</button></div>';
   if (visao === 'cal') {
     h += '<div class="card"><div class="cal">' + calHTML() + '</div></div>';
@@ -759,6 +774,7 @@ function renderGraficos() {
 function renderMais() {
   const regras = Object.entries(db.regras);
   let h = '<div class="card"><p class="titulo">Aparência</p><label class="f" style="margin-top:0">Tema</label><select class="c" data-ch="tema"><option value="auto"' + (db.cfg.tema === 'auto' ? ' selected' : '') + '>Automático (segue o celular)</option><option value="claro"' + (db.cfg.tema === 'claro' ? ' selected' : '') + '>Claro</option><option value="escuro"' + (db.cfg.tema === 'escuro' ? ' selected' : '') + '>Escuro</option></select>'
+    + '<label class="f">Saldo que você tinha antes do primeiro lançamento (R$)</label><input class="c" inputmode="decimal" data-in="saldoIni" placeholder="0,00" value="' + (db.cfg.saldoIni ? String(db.cfg.saldoIni).replace('.', ',') : '') + '"><p class="hint">Opcional. O saldo de cada mês já soma o que sobrou dos anteriores. Se o total não bater com o banco, ajuste aqui.</p>'
     + '<label class="f">Seu nome (para reconhecer transferências entre suas contas)</label><input class="c" data-in="nome" placeholder="Ex: Maria da Silva" value="' + esc(db.cfg.nome) + '"></div>';
   h += '<div class="card"><p class="titulo">Backup dos dados</p><p class="hint" style="margin:0 0 4px">Seus dados ficam só neste aparelho. Faça um backup de vez em quando e envie para o Drive ou WhatsApp.</p>'
     + '<button class="btn peq" data-a="expJSON">💾 Salvar backup</button><button class="btn peq sec" data-a="impJSON">📂 Restaurar backup</button><button class="btn peq sec" data-a="expCSV">📄 Exportar para Excel (CSV)</button></div>';
@@ -1128,7 +1144,8 @@ const MUDA = {
 };
 const DIGITA = {
   busca: el => { busca = el.value; renderLista(); },
-  nome: el => { db.cfg.nome = el.value.trim(); salvaDB(); }
+  nome: el => { db.cfg.nome = el.value.trim(); salvaDB(); },
+  saldoIni: el => { const v = parseFloat(String(el.value).replace(/\./g, '').replace(',', '.')); db.cfg.saldoIni = isNaN(v) ? 0 : v; salvaDB(); }
 };
 document.addEventListener('click', e => {
   if (e.target && e.target.id === 'mdl') { fechaSheet(); return; }
