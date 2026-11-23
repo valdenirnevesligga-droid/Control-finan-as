@@ -1,0 +1,6 @@
+node_modules/
+android/
+www/libs/
+*.jks
+*.keystore
+keystore.b64
